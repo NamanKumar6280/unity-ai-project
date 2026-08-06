@@ -1,0 +1,84 @@
+name: Build Unity APK from ZIP
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout the repository (includes HorrorGame_Unity.zip)
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      # Extract the ZIP file
+      - name: Extract Project
+        run: unzip HorrorGame_Unity.zip -d UnityProject
+
+      # Create BuildScript.cs if missing
+      - name: Create BuildScript.cs
+        run: |
+          mkdir -p UnityProject/Assets/Editor
+          cat > UnityProject/Assets/Editor/BuildScript.cs << 'EOF'
+          using UnityEditor;
+          using UnityEngine;
+          using System.Linq;
+
+          public static class BuildScript
+          {
+              [MenuItem("Build/Build Android")]
+              public static void BuildAndroid()
+              {
+                  BuildPlayerOptions buildOptions = new BuildPlayerOptions
+                  {
+                      scenes = EditorBuildSettings.scenes.Where(scene => scene.enabled).Select(scene => scene.path).ToArray(),
+                      locationPathName = "build/Android/HorrorGame.apk",
+                      target = BuildTarget.Android,
+                      options = BuildOptions.None
+                  };
+                  BuildPipeline.BuildPlayer(buildOptions);
+                  Debug.Log("APK built successfully!");
+              }
+          }
+          EOF
+
+      # Install Unity Hub
+      - name: Install Unity Hub
+        run: |
+          wget -q https://public-cdn.cloud.unity3d.com/hub/prod/UnityHub.AppImage
+          chmod +x UnityHub.AppImage
+          ./UnityHub.AppImage --headless install --version 2022.3.22f1 --changeset 000000000000
+          ./UnityHub.AppImage --headless install-modules --version 2022.3.22f1 --module android
+
+      # Activate Unity (Personal License)
+      - name: Activate Unity
+        run: |
+          mkdir -p ~/.local/share/unity3d/Unity/
+          echo '<?xml version="1.0" encoding="UTF-8"?>' > ~/.local/share/unity3d/Unity/Unity_lic.ulf
+          echo '<root><License id="personal"><Client>' >> ~/.local/share/unity3d/Unity/Unity_lic.ulf
+          echo '<MachineID>github-actions</MachineID>' >> ~/.local/share/unity3d/Unity/Unity_lic.ulf
+          echo '<Serial></Serial>' >> ~/.local/share/unity3d/Unity/Unity_lic.ulf
+          echo '<UserName>GitHub Actions</UserName>' >> ~/.local/share/unity3d/Unity/Unity_lic.ulf
+          echo '<Organization></Organization>' >> ~/.local/share/unity3d/Unity/Unity_lic.ulf
+          echo '</Client></License></root>' >> ~/.local/share/unity3d/Unity/Unity_lic.ulf
+
+      # Build the APK
+      - name: Build APK
+        run: |
+          export UNITY_EXECUTABLE=~/Unity/Hub/Editor/2022.3.22f1/Editor/Unity
+          chmod +x $UNITY_EXECUTABLE
+          cd UnityProject
+          $UNITY_EXECUTABLE -batchmode -quit -logFile - -projectPath . -executeMethod BuildScript.BuildAndroid -buildTarget Android
+
+      # Upload the APK
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HorrorGame-APK
+          path: UnityProject/build/Android/HorrorGame.apk
+          retention-days: 7
